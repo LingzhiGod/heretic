@@ -18,8 +18,16 @@ dtypes = [
 
 # Quantization method to use when loading the model. Options:
 # "none" (no quantization),
-# "bnb_4bit" (4-bit quantization using bitsandbytes).
+# "bnb_4bit" (4-bit quantization using bitsandbytes),
+# "w8a8" (8-bit weights and 8-bit activations).
 quantization = "none"
+
+# Backend to use for W8A8 quantization:
+# "auto"    = infer the backend from the checkpoint metadata when possible,
+# "compressed_tensors" = load a compressed-tensors W8A8 checkpoint,
+# "quanto"  = request Transformers Quanto int8/int8 quantization,
+# "torchao" = request TorchAO dynamic-activation int8/int8 quantization.
+w8a8_backend = "auto"
 
 # Device map to pass to Accelerate when loading the model.
 device_map = "auto"

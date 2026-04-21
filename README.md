@@ -99,7 +99,13 @@ the optimal batch size to make the most of the available hardware.
 On an RTX 3090, with the default configuration, decensoring Llama-3.1-8B-Instruct
 takes about 45 minutes. Note that Heretic supports model quantization with
 bitsandbytes, which can drastically reduce the amount of VRAM required to process
-models. Set the `quantization` option to `bnb_4bit` to enable quantization.
+models. Set the `quantization` option to `bnb_4bit` to enable 4-bit quantization.
+Heretic also supports `quantization = "w8a8"` for int8 weight + int8 activation
+checkpoints. For W8A8 models, leave `w8a8_backend = "auto"` to infer the backend
+from the checkpoint metadata when possible, or set `w8a8_backend` explicitly to
+`compressed_tensors`, `quanto`, or `torchao`. Compressed-tensors checkpoints
+require the `compressed-tensors` package and currently only support exporting
+the resulting LoRA adapter, not a merged full model.
 
 After Heretic has finished decensoring a model, you are given the option to
 save the model, upload it to Hugging Face, chat with it to test how well it works,
