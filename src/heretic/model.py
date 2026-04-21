@@ -6,7 +6,6 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Type, cast
 
-import bitsandbytes as bnb
 import torch
 import torch.linalg as LA
 import torch.nn.functional as F
@@ -19,7 +18,6 @@ from transformers import (
     AutoModelForImageTextToText,
     AutoTokenizer,
     BatchEncoding,
-    BitsAndBytesConfig,
     PretrainedConfig,
     PreTrainedModel,
     PreTrainedTokenizerBase,
@@ -30,6 +28,13 @@ from transformers.generation import (
 )
 
 from .config import QuantizationMethod, RowNormalization, Settings
+from .quantization import (
+    build_quantization_config,
+    extract_weight_data,
+    get_w8a8_backend,
+    is_quantized_method,
+    requires_adapter_only_export,
+)
 from .system import empty_cache
 from .utils import Prompt, batchify, print
 
@@ -136,6 +141,9 @@ class Model:
 
             if settings.quantization == QuantizationMethod.BNB_4BIT:
                 print("* Quantized to 4-bit precision")
+            elif settings.quantization == QuantizationMethod.W8A8:
+                backend = get_w8a8_backend(settings.model, settings.w8a8_backend)
+                print(f"* Loaded with W8A8 backend [bold]{backend}[/]")
 
             break
 
@@ -210,7 +218,7 @@ class Model:
             f"* LoRA adapters initialized (target types: {', '.join(display_targets)})"
         )
 
-    def _get_quantization_config(self, dtype: str) -> BitsAndBytesConfig | None:
+    def _get_quantization_config(self, dtype: str) -> Any | None:
         """
         Creates quantization config based on settings.
 
@@ -218,29 +226,30 @@ class Model:
             dtype: The dtype string (e.g., "auto", "bfloat16")
 
         Returns:
-            BitsAndBytesConfig or None
+            Backend-specific quantization config or None
         """
-        if self.settings.quantization == QuantizationMethod.BNB_4BIT:
-            # BitsAndBytesConfig expects a torch.dtype, not a string.
-            if dtype == "auto":
-                compute_dtype = torch.bfloat16
-            else:
-                compute_dtype = getattr(torch, dtype)
-
-            return BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_compute_dtype=compute_dtype,
-                bnb_4bit_quant_type="nf4",
-                bnb_4bit_use_double_quant=True,
-            )
-        return None
+        return build_quantization_config(
+            self.settings.quantization,
+            dtype,
+            self.settings.w8a8_backend,
+            self.settings.model,
+        )
 
     def get_merged_model(self) -> PreTrainedModel:
         # Guard against calling this method at the wrong time.
         assert isinstance(self.model, PeftModel)
 
         # Check if we need special handling for quantized models
-        if self.settings.quantization == QuantizationMethod.BNB_4BIT:
+        if is_quantized_method(self.settings.quantization):
+            if requires_adapter_only_export(
+                self.settings.quantization,
+                get_w8a8_backend(self.settings.model, self.settings.w8a8_backend),
+            ):
+                raise ValueError(
+                    "Compressed-tensors checkpoints can only export the LoRA adapter. "
+                    "Saving a merged full model is not supported."
+                )
+
             # Quantized models need special handling - we must reload the base model
             # in full precision to merge the LoRA adapters
 
@@ -473,22 +482,11 @@ class Model:
                     # FIXME: This cast is valid only under the assumption that the original
                     #        module wrapped by the LoRA adapter has a weight attribute.
                     #        See the comment above for why this is currently not guaranteed.
-                    base_weight = cast(Tensor, module.base_layer.weight)
-                    quant_state = getattr(base_weight, "quant_state", None)
-
-                    if quant_state is None:
-                        W = base_weight.to(torch.float32)
-                    else:
-                        # 4-bit quantization.
-                        # This cast is always valid. Type inference fails here because the
-                        # bnb.functional module is not found by ty for some reason.
-                        W = cast(
-                            Tensor,
-                            bnb.functional.dequantize_4bit(  # ty:ignore[possibly-missing-attribute]
-                                base_weight.data,
-                                quant_state,
-                            ).to(torch.float32),
-                        )
+                    base_weight = module.base_layer.weight
+                    W = cast(
+                        Tensor,
+                        extract_weight_data(base_weight).to(torch.float32),
+                    )
 
                     # Flatten weight matrix to (out_features, in_features).
                     W = W.view(W.shape[0], -1)

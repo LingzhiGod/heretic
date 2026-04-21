@@ -17,6 +17,14 @@ from pydantic_settings import (
 class QuantizationMethod(str, Enum):
     NONE = "none"
     BNB_4BIT = "bnb_4bit"
+    W8A8 = "w8a8"
+
+
+class W8A8Backend(str, Enum):
+    AUTO = "auto"
+    COMPRESSED_TENSORS = "compressed_tensors"
+    QUANTO = "quanto"
+    TORCHAO = "torchao"
 
 
 class RowNormalization(str, Enum):
@@ -112,7 +120,19 @@ class Settings(BaseSettings):
         description=(
             "Quantization method to use when loading the model. Options: "
             '"none" (no quantization), '
-            '"bnb_4bit" (4-bit quantization using bitsandbytes).'
+            '"bnb_4bit" (4-bit quantization using bitsandbytes), '
+            '"w8a8" (8-bit weights and 8-bit activations).'
+        ),
+    )
+
+    w8a8_backend: W8A8Backend = Field(
+        default=W8A8Backend.AUTO,
+        description=(
+            "Backend to use for W8A8 quantization. "
+            '"auto" expects a checkpoint with embedded quantization metadata, '
+            '"compressed_tensors" uses a compressed-tensors quantized checkpoint, '
+            '"quanto" requests Transformers Quanto int8/int8 quantization, '
+            'and "torchao" requests TorchAO dynamic-activation int8/int8 quantization.'
         ),
     )
 

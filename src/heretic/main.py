@@ -61,6 +61,11 @@ from .analyzer import Analyzer
 from .config import QuantizationMethod
 from .evaluator import Evaluator
 from .model import AbliterationParameters, Model, get_model_class
+from .quantization import (
+    get_w8a8_backend,
+    is_quantized_method,
+    requires_adapter_only_export,
+)
 from .system import empty_cache, get_accelerator_info
 from .utils import (
     format_duration,
@@ -86,7 +91,18 @@ def obtain_merge_strategy(settings: Settings) -> str | None:
     Returns "merge", "adapter", or None (if cancelled/invalid).
     """
 
-    if settings.quantization == QuantizationMethod.BNB_4BIT:
+    if is_quantized_method(settings.quantization):
+        w8a8_backend = get_w8a8_backend(settings.model, settings.w8a8_backend)
+        if requires_adapter_only_export(settings.quantization, w8a8_backend):
+            print()
+            print(
+                "[yellow]Compressed-tensors checkpoints cannot be exported as merged full models.[/]"
+            )
+            print(
+                "[yellow]You can still save or upload the LoRA adapter produced by Heretic.[/]"
+            )
+            return "adapter"
+
         print()
         print(
             "Model was loaded with quantization. Merging requires reloading the base model."
@@ -117,7 +133,7 @@ def obtain_merge_strategy(settings: Settings) -> str | None:
                 )
         except Exception:
             # Fallback if meta loading fails (e.g. owing to custom model code
-            # or bitsandbytes quantization config issues on the meta device).
+            # or quantization config issues on the meta device).
             print(
                 "[yellow]Rule of thumb: You need approximately 3x the parameter count in GB RAM.[/]"
             )
